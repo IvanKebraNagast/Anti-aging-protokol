@@ -1,0 +1,810 @@
+<html lang="sk">
+<!DOCTYPE html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anti-Aging Protokol</title>
+    <!-- Tailwind -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f0f4f8; }
+        .container { max-width: 600px; margin: auto; }
+        .tab-button.active { background-color: #3b82f6; color: white; box-shadow: 0 4px 6px -1px rgba(0,0,0,.1), 0 2px 4px -2px rgba(0,0,0,.1); }
+        .pill { background-color: #ecfdf5; border-left: 4px solid #10b981; }
+        .info-btn { font-weight: 700; border-radius: 9999px; padding: 0 8px; line-height: 20px; }
+        .content-section { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+
+    <!-- Firebase -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        setLogLevel('debug');
+
+        let db, auth, userId;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+
+        // Vytvorenie referencie na dokument pre ukladanie stavu užívateľa
+        const getChecklistDocRef = () => (db && userId) ? doc(db, `artifacts/${appId}/users/${userId}/anti_aging_protocol`, 'checklist_state') : null;
+
+        // ---------- INFO TEXTY (slovenčina) ----------
+        const INFO = {
+          'autofagia': 'Autofágia = telová recyklácia. Telo počas nej čistí poškodené bunky a opravuje sa. Spúšťa ju pôst (16/8, 24–48 h) a spermidín.',
+          'hiit': 'Krátky intenzívny tréning: 30 sekúnd rýchlo / 30 sekúnd pomaly × 4–6 kôl (trvá 4–6 min). Môžeš: jumping jacks, rýchle drepy, šprint na mieste alebo bicykel (20 s naplno / 40 s ľahko × 8).',
+          'omad': 'Jedno jedlo denne (OMAD) = 1 jedlo v 24 hodinách. Rob 2× do týždňa. Dovolené: voda, nesladený čaj, čierna káva.',
+          'sauna_chlad': 'Sauna 10–15 min → studená voda 30–60 s → znovu sauna 10 min → studená voda 30–60 s. Spolu 2–3 cykly. Teplo zapína HSP (heat-shock proteíny), chlad obnovuje mitochondrie.',
+          'fisetin': 'Fisetín – senolýza: 2 dni po sebe, vysoká dávka (cca 20 mg/kg hmotnosti/deň; pri 77 kg ~1500 mg/deň). Užívaj s tukom (napr. olivový olej, vajcia). V tie dni neber silné antioxidanty.',
+          'drepy_L1': 'Stoličkové drepy: Postav sa pred stoličku (nohy na šírku ramien), úplne si sadni a bez pomoci rúk vstaň. Opakuj 15–20×. Používa sa pri Leveli 1.',
+          'drepy_L2': 'Klasické drepy: Zadok dozadu ako pri sadaní, chrbát rovný, kolená nepredbiehajú prsty. 15–20×. Používa sa pri Leveli 2.',
+          'drepy_L3': 'Jumping drepy: Drep → výskok → drep. Mäkko dopadať, 10–12×. Vynechaj pri bolesti kolien. Používa sa pri Leveli 3.',
+          'ritual': 'Ranný 5-min rituál: Drepy (podľa úrovne) 15–20×, Kliky 8–12× (alebo o stenu), Plank 30–40 s. 2 kolá.',
+          'eatingwindow': 'Jesť v okne 8–10 hodín = všetko jedlo dňa zješ napr. medzi 10:00–18:00. Zvyšných 14–16 hodín je pôst (iba voda, nesladený čaj, čierna káva). Znižuje cukor v krvi, zlepšuje hormóny, spúšťa autofágiu.'
+        };
+        window.INFO = INFO; // Exponovanie pre globálne volanie infoModal
+
+        const todayStr = () => new Date().toISOString().slice(0,10);
+
+        // Funkcie na získanie kľúča pre týždeň a mesiac
+        const isoWeekKey = (d=new Date()) => {
+          const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+          const dayNum = date.getUTCDay() || 7;
+          date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+          const yearStart = new Date(Date.UTC(date.getUTCFullYear(),0,1));
+          const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+          return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2,'0')}`;
+        };
+        const isoMonthKey = (d=new Date()) => d.toISOString().slice(0, 7);
+
+        // Kontrola, či bol deň včera (pre streak)
+        const isYesterday = (ds) => {
+          if (!ds) return false;
+          const d1 = new Date(ds); 
+          const d2 = new Date(todayStr());
+          const diff = Math.round((d2.getTime() - d1.getTime()) / 86400000); // Rozdiel v dňoch
+          return diff === 1;
+        };
+
+        // Uloženie stavu do Firestore
+        window.saveChecklistState = async (state) => {
+          const docRef = getChecklistDocRef();
+          if (!docRef) return;
+          try { await setDoc(docRef, state, { merge: true }); }
+          catch(e){ console.error('Chyba uloženia do Firestore:', e); }
+        };
+
+        // Aplikácia stavu z Firestore na UI + Resetovacia logika
+        const applyChecklistState = (state) => {
+          // Inicializácia default stavov pre cvičenie a resety
+          if (![1,2,3].includes(state.squatLevel)) state.squatLevel = 1;
+          if (typeof state.squatStreak !== 'number') state.squatStreak = 0;
+          if (!state.lastMonthlyReset) state.lastMonthlyReset = isoMonthKey();
+          if (!state.lastWeeklyReset) state.lastWeeklyReset = isoWeekKey();
+          
+          let newState = { ...state };
+          const today = todayStr();
+          let stateChanged = false;
+
+          // 1. DENNÝ RESET
+          const lastDailyReset = newState.lastDailyReset || '2000-01-01';
+          if (today !== lastDailyReset) {
+            const keysToKeep = Object.keys(newState).filter(k => 
+                k.startsWith('weekly-') || k.startsWith('monthly-') || 
+                ['lastWeeklyReset', 'lastMonthlyReset', 'squatLevel', 'squatStreak', 'lastSquatTick'].includes(k)
+            );
+            
+            const newDaily = {};
+            keysToKeep.forEach(k => newDaily[k] = newState[k]);
+            newState = { ...newDaily, lastDailyReset: today };
+            stateChanged = true;
+          }
+
+          // 2. TÝŽDENNÝ RESET
+          const wk = isoWeekKey();
+          if (wk !== newState.lastWeeklyReset) {
+            Object.keys(newState).forEach(k => { if (k.startsWith('weekly-')) delete newState[k]; });
+            newState.lastWeeklyReset = wk;
+            stateChanged = true;
+          }
+
+          // 3. MESAČNÝ RESET
+          const monthKey = isoMonthKey();
+          if (monthKey !== newState.lastMonthlyReset) {
+            Object.keys(newState).forEach(k => { if (k.startsWith('monthly-')) delete newState[k]; });
+            newState.lastMonthlyReset = monthKey;
+            stateChanged = true;
+          }
+
+          if (stateChanged) {
+            window.saveChecklistState(newState);
+          }
+
+          // Aplikácia stavu na checkbox
+          document.querySelectorAll('input[type="checkbox"]').forEach(cb=>{
+            const id = cb.id;
+            if (id.startsWith('daily-') || id.startsWith('weekly-') || id.startsWith('monthly-')) {
+              cb.checked = !!newState[id];
+            }
+          });
+
+          // Aktualizácia UI
+          renderTrainingUI(newState);
+          renderFisetinPanel();
+        };
+
+        // Logika pre sledovanie a levelovanie drepov
+        function updateSquatProgressFromUI(state){
+          const chk = document.getElementById('daily-squats');
+          if (!chk) return state;
+          
+          let currentState = {...state};
+          
+          if (chk.checked) {
+            const lastTick = currentState.lastSquatTick || '';
+            const today = todayStr();
+            
+            if (lastTick !== today) {
+              if (isYesterday(lastTick)) {
+                currentState.squatStreak = (currentState.squatStreak || 0) + 1;
+              } else {
+                currentState.squatStreak = 1; // Nová séria
+              }
+              currentState.lastSquatTick = today;
+              
+              if (currentState.squatStreak >= 7 && currentState.squatLevel < 3) {
+                currentState.squatLevel += 1;
+                currentState.squatStreak = 0;
+                window.infoModal('Úroveň cvičenia zvýšená',
+                  `Gratulujem! Odomkol si Level ${currentState.squatLevel}. Tvoj tréning sa automaticky prepol na vyššiu úroveň.`,
+                  'OK');
+              }
+            }
+          } else {
+            // Ak užívateľ odškrtne úlohu
+            if (currentState.lastSquatTick === todayStr()) {
+               // Ak bola odškrtnutá v ten istý deň, rollback sa nekomplikuje, ale len sa resetuje denný stav
+               currentState.lastSquatTick = isYesterday(currentState.lastSquatTick) ? todayStr() : ''; // Zruší tick, ale nechá streak
+            }
+          }
+          renderTrainingUI(currentState);
+          return currentState;
+        }
+
+        // Vykreslenie UI pre drepy
+        function renderTrainingUI(state){
+          const lvlEl = document.getElementById('squat-level-val');
+          const streakEl = document.getElementById('squat-streak-val');
+          const labelEl = document.getElementById('daily-squats-label');
+
+          const levelNames = {1:'Level 1 – Stoličkové drepy', 2:'Level 2 – Klasické drepy', 3:'Level 3 – Jumping drepy'};
+          const levelInstr = {
+            1:'15–20×: sadni si na stoličku a vstaň bez rúk.',
+            2:'15–20×: drep bez stoličky, zadok dozadu, chrbát rovný.',
+            3:'10–12×: drep → výskok → drep. Mäkký dopad.'
+          };
+          const currentLevel = state.squatLevel || 1;
+          const currentStreak = state.squatStreak || 0;
+
+          if (lvlEl){ lvlEl.textContent = levelNames[currentLevel]; lvlEl.dataset.level = currentLevel; }
+          if (streakEl){ streakEl.textContent = `${currentStreak} / 7 dní`; streakEl.dataset.streak = currentStreak; streakEl.dataset.last = state.lastSquatTick || ''; }
+          if (labelEl){ labelEl.innerHTML = `Drepy <span class="text-sm text-gray-500">(${levelInstr[currentLevel]})</span>`; }
+        }
+
+        // Výpočet dní do najbližšieho Fisetínu (Deň 12)
+        function calculateNextFisetin() {
+          const now = new Date();
+          const fisetinDayOfMonth = 12; // Deň, kedy sa začína Fisetín
+          
+          let fisetinDate = new Date(now.getFullYear(), now.getMonth(), fisetinDayOfMonth);
+          fisetinDate.setHours(0, 0, 0, 0); // Nastav na polnoci
+
+          const today = new Date();
+          today.setHours(0, 0, 0, 0); // Dnešný deň
+
+          // Ak už sme po 13. dni, nastav Fisetín na budúci mesiac
+          if (now.getDate() > 13) {
+            fisetinDate = new Date(now.getFullYear(), now.getMonth() + 1, fisetinDayOfMonth);
+            fisetinDate.setHours(0, 0, 0, 0);
+          }
+          
+          const diffTime = fisetinDate.getTime() - today.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          
+          // Ak je dnes deň 12 alebo 13, ukáže 0 alebo -1, ale pre UI chceme ukázať 0 (DNES/ZAJTRA)
+          if (diffDays <= 1) {
+            return 0;
+          }
+          
+          return Math.max(0, diffDays);
+        }
+
+        // Vykreslenie Fisetin panelu
+        function renderFisetinPanel(){
+          const days = calculateNextFisetin();
+          const panel = document.getElementById('fisetin-next-display');
+          if (!panel) return;
+
+          const plural = (n) => (n === 1 ? 'DEŇ' : (n >= 2 && n <= 4 ? 'DNI' : 'DNÍ'));
+
+          if (days <= 0) {
+            panel.innerHTML = '<span class="text-red-700 font-bold">🔥 DNES/ZAJTRA!</span> Senolýza Fisetín.';
+            panel.className = 'p-4 rounded-xl shadow-md border-l-4 border-red-500 bg-red-100 text-gray-700 text-lg font-medium mb-6';
+          } else if (days <= 7) {
+            panel.innerHTML = `<span class="text-orange-700 font-bold">⚠️ ${days} ${plural(days)}</span> do Fisetínu (Deň 12). Priprav sa.`;
+            panel.className = 'p-4 rounded-xl shadow-md border-l-4 border-orange-500 bg-orange-100 text-gray-700 text-lg font-medium mb-6';
+          } else {
+            panel.innerHTML = `<span><span class="font-bold">${days} ${plural(days)}</span> do Fisetínu (Deň 12).</span>`;
+            panel.className = 'p-4 rounded-xl shadow-md border-l-4 border-blue-500 bg-blue-100 text-gray-700 text-lg font-medium mb-6';
+          }
+        }
+
+        // Načítanie stavu z Firestore a nastavenie real-time listenera
+        const loadChecklistState = () => {
+          const ref = getChecklistDocRef();
+          if (!ref) return;
+          onSnapshot(ref, (docSnap)=>{
+            if (docSnap.exists()) {
+              applyChecklistState(docSnap.data());
+            } else {
+              // Ak dokument neexistuje, inicializujeme s prázdnym stavom (čistý UI)
+              applyChecklistState({});
+            }
+          }, (err)=>console.error('onSnapshot error', err));
+        };
+
+        // Zostavenie stavu z aktuálneho UI
+        const buildStateFromUI = () => {
+          const newState = {};
+          document.querySelectorAll('input[type="checkbox"]').forEach(cb=>{
+            if (cb.id.startsWith('daily-') || cb.id.startsWith('weekly-') || cb.id.startsWith('monthly-')) {
+              newState[cb.id] = cb.checked;
+            }
+          });
+          // Pridanie informácií o úrovni drepov
+          const lvl = Number(document.getElementById('squat-level-val')?.dataset.level || 1);
+          const streak = Number(document.getElementById('squat-streak-val')?.dataset.streak || 0);
+          newState.squatLevel = lvl;
+          newState.squatStreak = streak;
+          const lst = document.getElementById('squat-streak-val')?.dataset.last || '';
+          if (lst) newState.lastSquatTick = lst;
+          
+          // Pridanie reset kľúčov
+          newState.lastMonthlyReset = isoMonthKey();
+          newState.lastWeeklyReset = isoWeekKey();
+          // Posledný daily reset sa pridá len pri úspešnej zmene (v applyChecklistState alebo manualDailyReset)
+          // Tu ho necháme tak ako je v DB, aby sme nespustili nechcený reset pri každej zmene
+          
+          return newState;
+        };
+
+        // Nastavenie listenerov pre všetky checkbox a info tlačidlá
+        const setupChecklistListeners = () => {
+          document.querySelectorAll('input[type="checkbox"]').forEach(cb=>{
+            cb.addEventListener('change', ()=>{
+              let state = buildStateFromUI();
+              state = updateSquatProgressFromUI(state); // Aktualizuj streak a level
+              state.lastDailyReset = todayStr(); // Potvrdzujeme denný stav
+              window.saveChecklistState(state);
+            });
+          });
+
+          document.querySelectorAll('[data-info]').forEach(btn=>{
+            btn.addEventListener('click', ()=>{
+              const key = btn.dataset.info;
+              window.infoModal(btn.dataset.title || 'Informácia', INFO[key] || '…');
+            });
+          });
+        };
+        
+        // Pomocná funkcia pre hromadné označenie Ranného stacku (pre Shortcuts)
+        window.markMorningStackDone = () => {
+          const ids = ['daily-water', 'daily-sunlight', 'daily-squats', 'daily-ritual', 'daily-breakfast'];
+          ids.forEach(id => {
+            const cb = document.getElementById(id);
+            if (cb && !cb.checked) cb.checked = true;
+          });
+          let state = buildStateFromUI();
+          state = updateSquatProgressFromUI(state);
+          state.lastDailyReset = todayStr();
+          window.saveChecklistState(state);
+        };
+        
+        // Pomocná funkcia pre hromadné označenie Večerného stacku (pre Shortcuts)
+        window.markNightStackDone = () => {
+          const ids = ['daily-lastmeal', 'daily-nightstack', 'daily-screenoff', 'daily-sleep'];
+          ids.forEach(id => {
+            const cb = document.getElementById(id);
+            if (cb && !cb.checked) cb.checked = true;
+          });
+          let state = buildStateFromUI();
+          state.lastDailyReset = todayStr();
+          window.saveChecklistState(state);
+        };
+
+        // Inicializácia aplikácie a prihlásenie
+        const initApp = async () => {
+          try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+
+            // Overenie a prihlásenie pomocou custom tokenu alebo anonymné prihlásenie
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+              await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+              await signInAnonymously(auth);
+            }
+
+            // Listener pre zmeny stavu prihlásenia
+            onAuthStateChanged(auth, (user) => {
+              if (user) {
+                userId = user.uid;
+                document.getElementById('user-id-display').textContent = `ID: ${userId}`;
+                loadChecklistState(); // Načítanie dát po úspešnom prihlásení
+                setupChecklistListeners();
+              } else {
+                document.getElementById('user-id-display').textContent = `ID: N/A`;
+              }
+            });
+
+          } catch (e) {
+            console.error('Chyba pri inicializácii Firebase:', e);
+            document.getElementById('error-message').textContent = 'Chyba pri pripojení k DB. Skontroluj konzolu.';
+          }
+        };
+        window.onload = initApp;
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div class="container p-4 sm:p-6 bg-white shadow-xl min-h-screen">
+    <header class="mb-6 pb-4 border-b border-gray-200">
+      <h1 class="text-3xl font-bold text-gray-900 text-center mb-1">🔥 ANTI-AGING PROTOKOL</h1>
+      <p class="text-sm text-gray-500 text-center mb-3">Tvoj sprievodca dlhovekosťou a regeneráciou</p>
+      <div id="user-id-display" class="text-xs text-gray-400 text-center truncate">ID: Načítavam...</div>
+      <div id="error-message" class="text-red-500 text-sm text-center font-medium"></div>
+    </header>
+
+    <nav class="flex justify-center space-x-2 sm:space-x-4 mb-6 sticky top-0 bg-white pt-2 z-10 border-b border-gray-100 -mx-4 sm:mx-0 px-4 sm:px-0">
+      <button data-target="overview" class="tab-button active flex-1 sm:flex-none px-3 py-2 text-sm font-medium rounded-lg transition">Prehľad</button>
+      <button data-target="daily" class="tab-button flex-1 sm:flex-none px-3 py-2 text-sm font-medium text-gray-600 rounded-lg hover:bg-gray-100 transition">Denný Režim</button>
+      <button data-target="monthly" class="tab-button flex-1 sm:flex-none px-3 py-2 text-sm font-medium text-gray-600 rounded-lg hover:bg-gray-100 transition">Reset Kalendár</button>
+      <button data-target="tests" class="tab-button flex-1 sm:flex-none px-3 py-2 text-sm font-medium text-gray-600 rounded-lg hover:bg-gray-100 transition">Krvné Testy</button>
+    </nav>
+
+    <!-- 1. PREHĽAD -->
+    <div id="overview" class="content-section">
+      <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2">5 Pilierov „Večnej Mladosti“</h2>
+
+      <div class="space-y-4">
+        <div class="p-4 rounded-xl pill shadow-sm flex items-start justify-between">
+          <div>
+            <p class="text-lg font-bold text-green-700">1️⃣ Nízky Zápal + Nízka Glykémia</p>
+            <p class="text-sm text-gray-600 mt-1">Žiadny cukor ani prepaľované oleje. Polyfenoly (olivový olej, čučoriedky, zelený čaj).</p>
+          </div>
+          <button class="info-btn bg-green-100 text-green-800" data-info="autofagia" data-title="Autofágia ℹ️">ℹ️</button>
+        </div>
+
+        <div class="p-4 rounded-xl pill shadow-sm flex items-start justify-between">
+          <div>
+            <p class="text-lg font-bold text-green-700">2️⃣ Autofágia (Telová recyklácia)</p>
+            <p class="text-sm text-gray-600 mt-1">16/8, OMAD 2× týždenne, 48 h pôst 1× mesačne, spermidín.</p>
+          </div>
+          <button class="info-btn bg-green-100 text-green-800" data-info="autofagia" data-title="Autofágia ℹ️">ℹ️</button>
+        </div>
+
+        <div class="p-4 rounded-xl pill shadow-sm">
+          <p class="text-lg font-bold text-green-700">3️⃣ Mitochondrie (Motor Mladosti)</p>
+          <p class="text-sm text-gray-600 mt-1">Studená voda, sauna, krátky intenzívny tréning. Doplnky: creatine, CoQ10, PQQ, L-carnitine. Spánok 7–9 h.</p>
+        </div>
+
+        <div class="p-4 rounded-xl pill shadow-sm">
+          <p class="text-lg font-bold text-green-700">4️⃣ Svaly (Orgán Dlhého Života)</p>
+          <p class="text-sm text-gray-600 mt-1">Silový tréning krátko, ale pravidelne. Bielkoviny 1.5–2 g/kg denne.</p>
+        </div>
+
+        <div class="p-4 rounded-xl pill shadow-sm">
+          <p class="text-lg font-bold text-green-700">5️⃣ Hormonálna Rovnováha</p>
+          <p class="text-sm text-gray-600 mt-1">DHEA, testosterón, IGF-1, melatonín – keď padnú, starnutie zrýchli 3×.</p>
+        </div>
+      </div>
+
+      <h3 class="text-xl font-semibold text-gray-800 mt-8 mb-4 border-b pb-2">⚠️ Najväčší Zabijaci Mladosti</h3>
+      <ul class="grid grid-cols-2 gap-3 text-sm">
+        <li class="bg-red-100 text-red-800 p-2 rounded-lg font-medium">❌ Chronický stres / kortizol</li>
+        <li class="bg-red-100 text-red-800 p-2 rounded-lg font-medium">❌ Vysoko spracované jedlá</li>
+        <li class="bg-red-100 text-red-800 p-2 rounded-lg font-medium">❌ Viscerálny tuk (= brucho)</li>
+        <li class="bg-red-100 text-red-800 p-2 rounded-lg font-medium">❌ Alkohol vo veľkom</li>
+        <li class="bg-red-100 text-red-800 p-2 rounded-lg font-medium">❌ Nedostatok spánku</li>
+        <li class="bg-red-100 text-red-800 p-2 rounded-lg font-medium">❌ Málo svalov</li>
+      </ul>
+    </div>
+
+    <!-- 2. DENNÝ REŽIM -->
+    <div id="daily" class="content-section hidden">
+      <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2">✅ Denný Anti-Aging Režim</h2>
+      <p class="text-sm text-gray-500 mb-4">Omladzujúci rituál pre každú časť dňa. Zaškrtni splnené úlohy.</p>
+
+      <!-- Centrálne tlačidlá pre iOS Shortcuts -->
+      <button onclick="markMorningStackDone()" class="w-full bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition mt-4 mb-2">
+        Označ RANNÝ STACK Hotový (pre Shortcuts)
+      </button>
+
+      <div class="space-y-6">
+        <!-- RÁNO -->
+        <div class="bg-blue-50 p-4 rounded-xl shadow-md">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-lg font-bold text-blue-800">🕒 RÁNO (0–60 min po zobudení)</h3>
+            <button class="info-btn bg-blue-100 text-blue-800" data-info="ritual" data-title="Ranný rituál ℹ️">ℹ️</button>
+          </div>
+          <ul class="space-y-2">
+            <li class="flex items-center space-x-2">
+              <input type="checkbox" id="daily-water" class="h-5 w-5 text-blue-600 rounded focus:ring-blue-500">
+              <label for="daily-water" class="text-gray-700 select-none">Vypi 0,5 L vody + štipka soli</label>
+            </li>
+            <li class="flex items-center space-x-2">
+              <input type="checkbox" id="daily-sunlight" class="h-5 w-5 text-blue-600 rounded focus:ring-blue-500">
+              <label for="daily-sunlight" class="text-gray-700 select-none">Slnečné svetlo do očí / vonku 3–5 min</label>
+            </li>
+
+            <!-- LEVELOVÝ BLOK: DREPY -->
+            <li class="flex items-center justify-between">
+              <div>
+                <span id="daily-squats-label" class="text-gray-700 font-medium">Drepy (zvolí sa podľa úrovne)</span>
+                <div class="text-xs text-gray-500">
+                  <span class="font-semibold">Aktuálna úroveň:</span> <span id="squat-level-val" data-level="1">Level 1 – Stoličkové drepy</span> •
+                  <span class="font-semibold">Séria:</span> <span id="squat-streak-val" data-streak="0">0 / 7 dní</span>
+                </div>
+              </div>
+              <div class="flex items-center space-x-2">
+                <button class="info-btn bg-blue-100 text-blue-800" data-info="drepy_L1" data-title="Drepy – úrovne ℹ️" onclick="window.cycleSquatInfo()">ℹ️</button>
+                <input type="checkbox" id="daily-squats" class="h-5 w-5 text-blue-600 rounded focus:ring-blue-500" title="Označ po dokončení dnešných drepov">
+              </div>
+            </li>
+
+            <li class="flex items-center space-x-2">
+              <input type="checkbox" id="daily-ritual" class="h-5 w-5 text-blue-600 rounded focus:ring-blue-500">
+              <label for="daily-ritual" class="text-gray-700 select-none">5-minútový silový rituál (Drepy/Kliky/Plank)</label>
+            </li>
+            <li class="flex items-center space-x-2">
+              <input type="checkbox" id="daily-breakfast" class="h-5 w-5 text-blue-600 rounded focus:ring-blue-500">
+              <label for="daily-breakfast" class="text-gray-700 select-none">Doplnky a raňajky (Bielkoviny + Tuky, nie cukor)</label>
+            </li>
+          </ul>
+        </div>
+
+        <!-- VEČER -->
+        <button onclick="markNightStackDone()" class="w-full bg-purple-600 text-white py-2 rounded-lg font-bold hover:bg-purple-700 transition mt-4 mb-2">
+          Označ VEČERNÝ STACK Hotový (pre Shortcuts)
+        </button>
+        <div class="bg-purple-50 p-4 rounded-xl shadow-md">
+          <h3 class="text-lg font-bold text-purple-800 border-b border-purple-200 pb-2 mb-3">🕒 VEČER (18:00 – 22:30)</h3>
+          <ul class="space-y-2">
+            <li class="flex items-center space-x-2">
+              <input type="checkbox" id="daily-lastmeal" class="h-5 w-5 text-purple-600 rounded focus:ring-purple-500">
+              <label for="daily-lastmeal" class="text-gray-700 select-none">Posledné jedlo max. 3h pred spaním</label>
+            </li>
+            <li class="flex items-center space-x-2">
+              <input type="checkbox" id="daily-nightstack" class="h-5 w-5 text-purple-600 rounded focus:ring-purple-500">
+              <label for="daily-nightstack" class="text-gray-700 select-none">Magnézium + Ashwagandha (Night Stack)</label>
+            </li>
+            <li class="flex items-center space-x-2">
+              <input type="checkbox" id="daily-screenoff" class="h-5 w-5 text-purple-600 rounded focus:ring-purple-500">
+              <label for="daily-screenoff" class="text-gray-700 select-none">Žiadny alkohol, žiadne modré svetlo po 22:00</label>
+            </li>
+            <li class="flex items-center space-x-2">
+              <input type="checkbox" id="daily-sleep" class="h-5 w-5 text-purple-600 rounded focus:ring-purple-500">
+              <label for="daily-sleep" class="text-gray-700 select-none">Spánok do 23:00 (7–9 h, izba 18–19 °C)</label>
+            </li>
+          </ul>
+        </div>
+
+        <!-- CELODENNÉ ZÁSADY -->
+        <div class="bg-green-50 p-4 rounded-xl shadow-md">
+          <h3 class="text-lg font-bold text-green-800 border-b border-green-200 pb-2 mb-3">🟢 CELODENNÉ ZÁSADY</h3>
+          <ul class="space-y-2">
+            <li class="flex items-center space-x-2">
+              <input type="checkbox" id="daily-hydration" class="h-5 w-5 text-green-600 rounded focus:ring-green-500">
+              <label for="daily-hydration" class="text-gray-700 select-none">Hydratácia + Káva/Zelený čaj (polyfenoly)</label>
+            </li>
+            <li class="flex items-center space-x-2">
+              <input type="checkbox" id="daily-steps" class="h-5 w-5 text-green-600 rounded focus:ring-green-500">
+              <label for="daily-steps" class="text-gray-700 select-none">Min. 7 000 krokov / po jedle 5 min chôdze</label>
+            </li>
+            <li class="flex items-center space-x-2">
+              <input type="checkbox" id="daily-eatingwindow" class="h-5 w-5 text-green-600 rounded focus:ring-green-500">
+              <label for="daily-eatingwindow" class="text-gray-700 select-none">Jesť v okne 8–10 hodín denne</label>
+              <button class="info-btn bg-green-100 text-green-800" data-info="eatingwindow" data-title="Časové okno jedenia ℹ️">ℹ️</button>
+            </li>
+          </ul>
+        </div>
+
+        <!-- TÝŽDENNÉ ÚLOHY -->
+        <div class="bg-amber-50 p-4 rounded-xl shadow-md">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-lg font-bold text-amber-800">📅 TÝŽDENNÉ ÚLOHY (auto-reset každý týždeň)</h3>
+            <div class="flex items-center space-x-2">
+              <button class="info-btn bg-amber-100 text-amber-800" data-info="hiit" data-title="Krátky intenzívny tréning ℹ️">ℹ️</button>
+              <button class="info-btn bg-amber-100 text-amber-800" data-info="omad" data-title="Jedno jedlo denne ℹ️">ℹ️</button>
+            </div>
+          </div>
+          <ul class="space-y-2">
+            <li class="flex items-center justify-between">
+              <span class="text-gray-700 select-none">Krátky intenzívny tréning (2× do týždňa)</span>
+              <div class="flex items-center space-x-2">
+                <input type="checkbox" id="weekly-hiit-1" class="h-5 w-5 text-amber-600 rounded focus:ring-amber-500" title="HIIT – séria 1">
+                <input type="checkbox" id="weekly-hiit-2" class="h-5 w-5 text-amber-600 rounded focus:ring-amber-500" title="HIIT – séria 2">
+              </div>
+            </li>
+            <li class="flex items-center justify-between">
+              <span class="text-gray-700 select-none">Jedno jedlo denne (OMAD) – 2× do týždňa</span>
+              <div class="flex items-center space-x-2">
+                <input type="checkbox" id="weekly-omad-1" class="h-5 w-5 text-amber-600 rounded focus:ring-amber-500" title="OMAD – deň 1">
+                <input type="checkbox" id="weekly-omad-2" class="h-5 w-5 text-amber-600 rounded focus:ring-amber-500" title="OMAD – deň 2">
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Manuálny reset dňa -->
+        <button onclick="manualDailyReset()" class="w-full bg-gray-200 text-gray-800 py-2 rounded-lg font-medium hover:bg-gray-300 transition">Manuálne Resetovať Denné Úlohy</button>
+      </div>
+    </div>
+
+    <!-- 3. MESAČNÝ RESET -->
+    <div id="monthly" class="content-section hidden">
+      <div class="flex items-center justify-between">
+        <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2">📅 Mesačný Longevity Reset (1.0)</h2>
+        <button class="info-btn bg-indigo-100 text-indigo-800" data-info="sauna_chlad" data-title="Teplo + chlad ℹ️">ℹ️</button>
+      </div>
+
+      <!-- FISETIN PANEL -->
+      <div id="fisetin-next-display" data-last-monthly-reset="" class="p-4 rounded-xl shadow-md border-l-4 border-blue-500 bg-blue-100 text-gray-700 text-lg font-medium mb-6">
+        Načítavam...
+      </div>
+
+      <p class="text-sm text-gray-500 mb-4">30-dňový cyklus: senolýza + autofágia + mitochondrie. <span class="font-bold text-red-600">Automaticky sa resetuje 1. deň v mesiaci.</span></p>
+
+      <div class="space-y-3">
+        <div class="p-3 bg-indigo-50 rounded-xl shadow-sm flex justify-between items-center">
+          <span class="text-gray-700 font-medium">Deň 5: 18–24 h pôst</span>
+          <input type="checkbox" id="monthly-day5" class="h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500">
+        </div>
+        <div class="p-3 bg-indigo-50 rounded-xl shadow-sm flex justify-between items-center">
+          <span class="text-gray-700 font-medium">Deň 7: Sauna + studená sprcha (2–3 cykly)</span>
+          <input type="checkbox" id="monthly-day7" class="h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500">
+        </div>
+        <div class="p-3 bg-indigo-50 rounded-xl shadow-sm flex justify-between items-center">
+          <span class="text-gray-700 font-medium">Deň 10: 24 h bez sacharidov</span>
+          <input type="checkbox" id="monthly-day10" class="h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500">
+        </div>
+        <div class="p-3 bg-red-100 rounded-xl shadow-sm flex justify-between items-center border border-red-300">
+          <span class="text-red-800 font-bold">Deň 12–13: Fisetín – zabitie starých buniek (senolýza)</span>
+          <div class="flex items-center space-x-2">
+            <button class="info-btn bg-red-200 text-red-800" data-info="fisetin" data-title="Fisetín protokol ℹ️">ℹ️</button>
+            <input type="checkbox" id="monthly-day12-13" class="h-5 w-5 text-red-600 rounded focus:ring-red-500">
+          </div>
+        </div>
+        <div class="p-3 bg-indigo-50 rounded-xl shadow-sm flex justify-between items-center">
+          <span class="text-gray-700 font-medium">Deň 15: 18 h pôst (len voda/čaj/káva)</span>
+          <input type="checkbox" id="monthly-day15" class="h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500">
+        </div>
+        <div class="p-3 bg-indigo-50 rounded-xl shadow-sm flex justify-between items-center">
+          <span class="text-gray-700 font-medium">Deň 20: Sauna + ľadová voda (Mitochondrie)</span>
+          <input type="checkbox" id="monthly-day20" class="h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500">
+        </div>
+        <div class="p-3 bg-indigo-50 rounded-xl shadow-sm flex justify-between items-center">
+          <span class="text-gray-700 font-medium">Deň 22: 18–24 h pôst</span>
+          <input type="checkbox" id="monthly-day22" class="h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500">
+        </div>
+        <div class="p-3 bg-indigo-50 rounded-xl shadow-sm flex justify-between items-center">
+          <span class="text-gray-700 font-medium">Deň 25: Deň s vysokými polyfenolmi (olivový olej, bobule)</span>
+          <input type="checkbox" id="monthly-day25" class="h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500">
+        </div>
+        <div class="p-3 bg-indigo-50 rounded-xl shadow-sm flex justify-between items-center">
+          <span class="text-gray-700 font-medium">Deň 27: 10 min tréning namiesto 5 (Svalový boost)</span>
+          <input type="checkbox" id="monthly-day27" class="h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500">
+        </div>
+
+        <button onclick="manualMonthlyReset()" class="w-full bg-gray-200 text-gray-800 py-2 rounded-lg font-medium hover:bg-gray-300 transition mt-4">Manuálne Resetovať Mesačný Protokol</button>
+      </div>
+    </div>
+
+    <!-- 4. KRVNÉ TESTY -->
+    <div id="tests" class="content-section hidden">
+      <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2">🧪 Anti-Aging Krvné Markery (2× ročne)</h2>
+      <p class="text-sm text-gray-500 mb-4">Sleduj reálne ukazovatele biologického veku.</p>
+      <div class="overflow-x-auto rounded-xl shadow-lg">
+        <table class="min-w-full bg-white">
+          <thead class="bg-gray-200 text-gray-600 uppercase text-xs leading-normal">
+            <tr>
+              <th class="py-3 px-6 text-left">Marker</th>
+              <th class="py-3 px-6 text-left">Prečo dôležitý</th>
+              <th class="py-3 px-6 text-center">Ideálna hodnota</th>
+            </tr>
+          </thead>
+          <tbody class="text-gray-600 text-sm font-light">
+            <tr class="border-b border-gray-200 hover:bg-red-50">
+              <td class="py-3 px-6 font-medium">CRP (Zápal)</td>
+              <td class="py-3 px-6">Rýchlosť starnutia</td>
+              <td class="py-3 px-6 text-center text-red-600 font-bold">&lt; 0,5 mg/L</td>
+            </tr>
+            <tr class="border-b border-gray-200 hover:bg-yellow-50">
+              <td class="py-3 px-6 font-medium">Fasting Insulin</td>
+              <td class="py-3 px-6">Inzulínová citlivosť</td>
+              <td class="py-3 px-6 text-center text-yellow-600 font-bold">&lt; 5 mIU/L</td>
+            </tr>
+            <tr class="border-b border-gray-200 hover:bg-green-50">
+              <td class="py-3 px-6 font-medium">ApoB (Cievy)</td>
+              <td class="py-3 px-6">Riziko infarktu</td>
+              <td class="py-3 px-6 text-center text-green-600 font-bold">&lt; 80 mg/dL</td>
+            </tr>
+            <tr class="border-b border-gray-200 hover:bg-green-50">
+              <td class="py-3 px-6 font-medium">Homocysteín (DNA)</td>
+              <td class="py-3 px-6">Metylácia DNA, mozog</td>
+              <td class="py-3 px-6 text-center text-green-600 font-bold">&lt; 9 µmol/L</td>
+            </tr>
+            <tr class="border-b border-gray-200 hover:bg-yellow-50">
+              <td class="py-3 px-6 font-medium">DHEA-S / Testosterón</td>
+              <td class="py-3 px-6">Anti-starnúci hormón / Libido</td>
+              <td class="py-3 px-6 text-center text-yellow-600 font-bold">Horná 1/3 normy</td>
+            </tr>
+            <tr class="hover:bg-green-50">
+              <td class="py-3 px-6 font-medium">Vitamín D3</td>
+              <td class="py-3 px-6">Imunita, hormóny</td>
+              <td class="py-3 px-6 text-center text-green-600 font-bold">40–60 ng/ml</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-6 p-4 bg-yellow-50 rounded-xl shadow-md">
+        <p class="text-sm text-yellow-800 font-medium">
+          Pre „skutočný anti-aging monitoring“ sleduj aj VO2max, grip strength a HRV. Epigenetické testy (Horvath/TruAge) 1× ročne.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL - Náhrada za alert/confirm -->
+  <div id="modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden flex items-center justify-center p-4 z-50 transition-opacity duration-300">
+    <div class="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full">
+      <h3 id="modal-title" class="text-xl font-bold mb-4 text-gray-800">Potvrdenie</h3>
+      <p id="modal-text" class="text-gray-600 mb-6">Text</p>
+      <div id="modal-actions" class="flex justify-end space-x-3">
+        <button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition">Zavrieť</button>
+        <button id="modal-confirm" class="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Tabs prepínanie
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const contentSections = document.querySelectorAll('.content-section');
+    tabButtons.forEach(button=>{
+      button.addEventListener('click', ()=>{
+        const targetId = button.dataset.target;
+        contentSections.forEach(s => s.classList.add('hidden'));
+        document.getElementById(targetId).classList.remove('hidden');
+        
+        // Aktualizácia aktívneho tlačidla
+        tabButtons.forEach(btn => {
+          btn.classList.remove('active','bg-blue-600','text-white');
+          btn.classList.add('text-gray-600', 'hover:bg-gray-100');
+        });
+        button.classList.add('active','bg-blue-600','text-white');
+        button.classList.remove('text-gray-600', 'hover:bg-gray-100');
+      });
+    });
+
+    // Modal helper
+    const modal = document.getElementById('modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalText = document.getElementById('modal-text');
+    const modalConfirm = document.getElementById('modal-confirm');
+
+    window.closeModal = function(){
+      modal.classList.add('hidden');
+      document.querySelector('#modal-actions button:first-child').classList.remove('hidden');
+    }
+
+    // Modal pre potvrdenie (s OK/Cancel logikou)
+    window.showModal = function(title, text, onConfirm, confirmLabel='Resetovať'){
+      modalTitle.textContent = title;
+      modalText.textContent = text;
+      modal.classList.remove('hidden');
+
+      // Vytvorenie nového Confirm tlačidla na zabezpečenie 'once: true'
+      const newBtn = document.createElement('button');
+      newBtn.id = 'modal-confirm-temp';
+      newBtn.className = 'px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition';
+      newBtn.textContent = confirmLabel;
+      
+      // Nahradenie pôvodného tlačidla (aby sme sa vyhli duplicitným listenerom)
+      const oldBtn = document.getElementById('modal-confirm-temp') || modalConfirm;
+      oldBtn.parentNode.replaceChild(newBtn, oldBtn);
+
+      newBtn.addEventListener('click', ()=>{
+        if (onConfirm) onConfirm();
+        window.closeModal();
+      }, { once: true });
+    }
+
+    // Modal pre informácie (len OK logikou)
+    window.infoModal = function(title, text, okLabel='OK'){
+      modalTitle.textContent = title;
+      modalText.textContent = text;
+      modal.classList.remove('hidden');
+      
+      const confirmButton = document.getElementById('modal-confirm');
+      
+      // Klonovanie tlačidla OK
+      const newBtn = confirmButton.cloneNode(true);
+      newBtn.id = 'modal-confirm-temp';
+      newBtn.textContent = okLabel;
+      newBtn.classList.remove('bg-red-600', 'hover:bg-red-700');
+      newBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+      
+      const oldBtn = document.getElementById('modal-confirm-temp') || confirmButton;
+      oldBtn.parentNode.replaceChild(newBtn, oldBtn);
+
+      document.querySelector('#modal-actions button:first-child').classList.add('hidden');
+      newBtn.addEventListener('click', window.closeModal, { once: true });
+    }
+
+    // Kolovanie info pre drepy (L1→L2→L3)
+    window.cycleSquatInfo = function(){
+      const lvlEl = document.getElementById('squat-level-val');
+      const lvl = Number(lvlEl.dataset.level || 1);
+      const map = {1:'drepy_L1', 2:'drepy_L2', 3:'drepy_L3'};
+      const titles = {1:'Drepy – Level 1 ℹ️', 2:'Drepy – Level 2 ℹ️', 3:'Drepy – Level 3 ℹ️'};
+      const key = map[lvl];
+      const text = window.INFO ? (window.INFO[key] || 'Popis chýba.') : 'Popis chýba (chyba načítania INFO dát).';
+      window.infoModal(titles[lvl], text, 'OK');
+    }
+
+    // Manuálny reset – denný
+    window.manualDailyReset = () => {
+      window.showModal("Reset Denného Režimu", "Naozaj chceš manuálne resetovať denné úlohy? Táto akcia vymaže dnešné zaškrtnutia, ale zachová Level Drepy/Streak.", () => {
+        document.querySelectorAll('input[id^="daily-"]').forEach(cb => cb.checked = false);
+        
+        let state = buildStateFromUI();
+        // Resetujeme len lastDailyReset na včerajšok, aby pri najbližšom načítaní došlo k resetu denných úloh
+        const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
+        state.lastDailyReset = yesterday;
+        
+        // Resetujeme tick, ale nie streak (ak to nebolo urobené dnes)
+        if (state.lastSquatTick === todayStr()) {
+          state.lastSquatTick = isYesterday(yesterday) ? yesterday : '';
+        }
+        
+        window.saveChecklistState(state);
+      }, 'Resetovať');
+    };
+
+    // Manuálny reset – mesačný
+    window.manualMonthlyReset = () => {
+      window.showModal("Reset Mesačného Protokolu", "Naozaj chceš resetovať VŠETKY mesačné úlohy (pôsty, fisetín atď.)? Budú vynulované aj v aktuálnom mesiaci. Túto akciu použite, ak chcete začať protokol odznova.", () => {
+        document.querySelectorAll('input[id^="monthly-"]').forEach(cb => cb.checked = false);
+        
+        let state = buildStateFromUI();
+        
+        // Nastavenie lastMonthlyReset na minulý mesiac, aby sa reset spustil
+        const d = new Date();
+        d.setMonth(d.getMonth() - 1);
+        state.lastMonthlyReset = d.toISOString().slice(0, 7);
+        
+        // Odstránenie starých mesačných kľúčov
+        Object.keys(state).forEach(k=>{ if (k.startsWith('monthly-')) delete state[k]; });
+        
+        window.saveChecklistState(state);
+      }, 'Resetovať');
+    };
+  </script>
+</body>
+</html>
+
