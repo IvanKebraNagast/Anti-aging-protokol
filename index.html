@@ -34,16 +34,26 @@
 
         // ---------- INFO TEXTY (slovenčina) ----------
         const INFO = {
-          'autofagia': 'Autofágia = telová recyklácia. Telo počas nej čistí poškodené bunky a opravuje sa. Spúšťa ju pôst (16/8, 24–48 h) a spermidín.',
+          // AKTUALIZOVANÉ pre Nízky Zápal (Pillar 1)
+          'low_inflammation': 'Áno, žiadny cukor a prepaľované oleje. Chronický zápal je hlavný urýchľovač starnutia, preto sa vyhýbaj jednoduchým cukrom a spracovaným, prepáleným rastlinným olejom (slnečnicový, repkový, sójový). Polyfenoly (olivový olej, čučoriedky, zelený čaj) sú silné antioxidanty, ktoré zápal znižujú – ÁNO, sú kľúčové!',
+          
+          // AKTUALIZOVANÉ pre Autofágiu (Pillar 2)
+          'autofagia': 'Autofágia = telová recyklácia (doslova „sebapožieranie“). Telo počas nej čistí poškodené a nefunkčné bunky a opravuje sa. Spúšťa ju obmedzenie kalórií – pôst (napr. 16/8 alebo 24–48 h) a spermidín. Je to kľúčový mechanizmus dlhovekosti.',
+          
+          // AKTUALIZOVANÉ pre Saunu a chlad (Pillar 3)
+          'sauna_chlad': 'Teplo a chlad sú horméza, ktorá extrémne prospieva mitochondriám. Postup: 1. Sauna (80–100 °C, 10–15 min) → 2. Studená voda/sprcha (10–15 °C, 30–60 s) → Zopakuj 2–3 cykly. Teplo zapína HSP (heat-shock proteíny), chlad obnovuje mitochondrie a hnedý tuk. Odporúča sa 2–3 krát do týždňa.',
+          
+          // AKTUALIZOVANÉ pre Pôst (Autofágia detaily)
+          'eatingwindow': 'Jesť v okne 8–10 hodín = všetko jedlo dňa zješ napr. medzi 10:00–18:00 (8h okno). Zvyšných 14–16 hodín je pôst (iba voda, nesladený čaj, čierna káva). Teda, **16h sa neje, 8h sa je** (napr. 10:00-18:00). Dlhšie pôsty (24–48 h) znamenajú **24h alebo 48h nejesť**, len piť tekutiny.',
+          
           'hiit': 'Krátky intenzívny tréning: 30 sekúnd rýchlo / 30 sekúnd pomaly × 4–6 kôl (trvá 4–6 min). Môžeš: jumping jacks, rýchle drepy, šprint na mieste alebo bicykel (20 s naplno / 40 s ľahko × 8).',
           'omad': 'Jedno jedlo denne (OMAD) = 1 jedlo v 24 hodinách. Rob 2× do týždňa. Dovolené: voda, nesladený čaj, čierna káva.',
-          'sauna_chlad': 'Sauna 10–15 min → studená voda 30–60 s → znovu sauna 10 min → studená voda 30–60 s. Spolu 2–3 cykly. Teplo zapína HSP (heat-shock proteíny), chlad obnovuje mitochondrie.',
+          
           'fisetin': 'Fisetín – senolýza: 2 dni po sebe, vysoká dávka (cca 20 mg/kg hmotnosti/deň; pri 77 kg ~1500 mg/deň). Užívaj s tukom (napr. olivový olej, vajcia). V tie dni neber silné antioxidanty.',
           'drepy_L1': 'Stoličkové drepy: Postav sa pred stoličku (nohy na šírku ramien), úplne si sadni a bez pomoci rúk vstaň. Opakuj 15–20×. Používa sa pri Leveli 1.',
           'drepy_L2': 'Klasické drepy: Zadok dozadu ako pri sadaní, chrbát rovný, kolená nepredbiehajú prsty. 15–20×. Používa sa pri Leveli 2.',
           'drepy_L3': 'Jumping drepy: Drep → výskok → drep. Mäkko dopadať, 10–12×. Vynechaj pri bolesti kolien. Používa sa pri Leveli 3.',
           'ritual': 'Ranný 5-min rituál: Drepy (podľa úrovne) 15–20×, Kliky 8–12× (alebo o stenu), Plank 30–40 s. 2 kolá.',
-          'eatingwindow': 'Jesť v okne 8–10 hodín = všetko jedlo dňa zješ napr. medzi 10:00–18:00. Zvyšných 14–16 hodín je pôst (iba voda, nesladený čaj, čierna káva). Znižuje cukor v krvi, zlepšuje hormóny, spúšťa autofágiu.'
         };
         window.INFO = INFO; // Exponovanie pre globálne volanie infoModal
 
@@ -380,25 +390,31 @@
       <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2">5 Pilierov „Večnej Mladosti“</h2>
 
       <div class="space-y-4">
+        <!-- AKTUALIZOVANÉ: Pillar 1 - Nízky Zápal -->
         <div class="p-4 rounded-xl pill shadow-sm flex items-start justify-between">
           <div>
             <p class="text-lg font-bold text-green-700">1️⃣ Nízky Zápal + Nízka Glykémia</p>
-            <p class="text-sm text-gray-600 mt-1">Žiadny cukor ani prepaľované oleje. Polyfenoly (olivový olej, čučoriedky, zelený čaj).</p>
+            <p class="text-sm text-gray-600 mt-1">Žiadny cukor, prepaľované oleje (❌). Polyfenoly (olivový olej, čučoriedky) (✅).</p>
           </div>
-          <button class="info-btn bg-green-100 text-green-800" data-info="autofagia" data-title="Autofágia ℹ️">ℹ️</button>
+          <button class="info-btn bg-green-100 text-green-800" data-info="low_inflammation" data-title="Zápal a glykémia ℹ️">ℹ️</button>
         </div>
 
+        <!-- AKTUALIZOVANÉ: Pillar 2 - Autofágia (Prehľad) -->
         <div class="p-4 rounded-xl pill shadow-sm flex items-start justify-between">
           <div>
             <p class="text-lg font-bold text-green-700">2️⃣ Autofágia (Telová recyklácia)</p>
-            <p class="text-sm text-gray-600 mt-1">16/8, OMAD 2× týždenne, 48 h pôst 1× mesačne, spermidín.</p>
+            <p class="text-sm text-gray-600 mt-1">Pôst 16/8, OMAD 2× týždenne, 48 h pôst 1× mesačne, spermidín.</p>
           </div>
-          <button class="info-btn bg-green-100 text-green-800" data-info="autofagia" data-title="Autofágia ℹ️">ℹ️</button>
+          <button class="info-btn bg-green-100 text-green-800" data-info="eatingwindow" data-title="Pôst a okná jedenia ℹ️">ℹ️</button>
         </div>
 
-        <div class="p-4 rounded-xl pill shadow-sm">
-          <p class="text-lg font-bold text-green-700">3️⃣ Mitochondrie (Motor Mladosti)</p>
-          <p class="text-sm text-gray-600 mt-1">Studená voda, sauna, krátky intenzívny tréning. Doplnky: creatine, CoQ10, PQQ, L-carnitine. Spánok 7–9 h.</p>
+        <!-- AKTUALIZOVANÉ: Pillar 3 - Mitochondrie (Pridané info tlačidlo) -->
+        <div class="p-4 rounded-xl pill shadow-sm flex items-start justify-between">
+          <div>
+            <p class="text-lg font-bold text-green-700">3️⃣ Mitochondrie (Motor Mladosti)</p>
+            <p class="text-sm text-gray-600 mt-1">Studená voda, sauna, krátky intenzívny tréning. Doplnky: creatine, CoQ10, PQQ, L-carnitine. Spánok 7–9 h.</p>
+          </div>
+          <button class="info-btn bg-green-100 text-green-800" data-info="sauna_chlad" data-title="Sauna + chlad protokol ℹ️">ℹ️</button>
         </div>
 
         <div class="p-4 rounded-xl pill shadow-sm">
@@ -558,7 +574,7 @@
     <div id="monthly" class="content-section hidden">
       <div class="flex items-center justify-between">
         <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2">📅 Mesačný Longevity Reset (1.0)</h2>
-        <button class="info-btn bg-indigo-100 text-indigo-800" data-info="sauna_chlad" data-title="Teplo + chlad ℹ️">ℹ️</button>
+        <button class="info-btn bg-indigo-100 text-indigo-800" data-info="sauna_chlad" data-title="Teplo + chlad protokol ℹ️">ℹ️</button>
       </div>
 
       <!-- FISETIN PANEL -->
@@ -807,4 +823,3 @@
   </script>
 </body>
 </html>
-
